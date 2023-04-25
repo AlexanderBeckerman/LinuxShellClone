@@ -12,7 +12,18 @@ int contains_pipe(char **, int);
 
 int contains_redirect(char **, int);
 
+void handler(int signo){
+    return;
+}
+
+
 int prepare(void) {
+
+    struct sigaction newAction = {.sa_handler = handler};
+    if(sigaction(SIGINT, &newAction, NULL) == -1){
+        perror("Signal handle registration failed");
+        exit(EXIT_FAILURE);
+    }
     return 0;
 }
 
@@ -33,7 +44,7 @@ int process_arglist(int count, char **arglist) {
             perror("Failed forking!");
             return 0;
         }
-        if (pid == 0) // son code
+        if (pid == 0) // child code
         {
             execvp(arglist[0], arglist);
             exit(1);
@@ -72,27 +83,19 @@ int process_arglist(int count, char **arglist) {
             }
             if (pid2 == 0) { // child2 code - reads from pipe
                 close(pfds[1]);
-                // printf("inside child2 before dup2\n");
                 int dup_exit = dup2(pfds[0], STDIN_FILENO);
                 close(pfds[0]);
                 if (dup_exit == -1) {
                     perror("dup error");
                     exit(1);
                 }
-                // char buf[1024];
-                // read(STDIN_FILENO, &buf, 1024);
-                // printf("%s\n", buf);
                 execvp(args2[0], args2);
             }
-            printf("pid2= %d\n", pid2);
-            // write(pfds[1], EOF, 1);
             close(pfds[0]);
             close(pfds[1]);
             while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
-            printf("got here after wait pid2\n");
         } else { // child1 code - writes to pipe
             close(pfds[0]);
-            // printf("inside child1 before dup2\n");
             int dup_exit = dup2(pfds[1], STDOUT_FILENO);
             close(pfds[1]);
             if (dup_exit == -1) {
@@ -101,12 +104,11 @@ int process_arglist(int count, char **arglist) {
             }
             execvp(args1[0], args1);
         }
-
-
         
-        // printf("got to parent return\n");
         return 1;
-    } else if ((index = contains_redirect(arglist, count)) != -1) { // handle redirect
+    } 
+    index = contains_redirect(arglist, count);
+    if (index != -1) { // handle redirect
 
     } else { // handle basic command
         int pid = fork();
