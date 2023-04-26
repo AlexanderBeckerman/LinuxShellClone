@@ -12,7 +12,7 @@ int contains_pipe(char **, int);
 
 int contains_redirect(char **, int);
 
-void handler(int signo){
+void handler(int signo) {
     return;
 }
 
@@ -20,7 +20,7 @@ void handler(int signo){
 int prepare(void) {
 
     struct sigaction newAction = {.sa_handler = handler};
-    if(sigaction(SIGINT, &newAction, NULL) == -1){
+    if (sigaction(SIGINT, &newAction, NULL) == -1) {
         perror("Signal handle registration failed");
         exit(EXIT_FAILURE);
     }
@@ -104,11 +104,42 @@ int process_arglist(int count, char **arglist) {
             }
             execvp(args1[0], args1);
         }
-        
+
         return 1;
-    } 
+    }
     index = contains_redirect(arglist, count);
     if (index != -1) { // handle redirect
+
+        char **args1 = arglist;
+        char *filename = arglist[index + 1];
+        arglist[index] = NULL;
+        int fd = open(filename, O_RDONLY);
+        if (fd == -1) {
+            perror("failed opening file!");
+            return 0;
+        }
+        int pid = fork();
+        if (pid == -1) {
+            perror("Failed forking!");
+            return 0;
+        }
+        if (pid > 0) {
+            while ((waitpid(pid, &status, 0) == -1) &&
+                   (errno == ECHILD || errno == EINTR)); //wait for the child to finish
+            if (close(fd) == -1) {
+                perror("error closing file");
+                return 0;
+            }
+            return 1;
+        } else {
+            int dup_exit = dup2(fd, STDIN_FILENO);
+            if (dup_exit == -1) {
+                perror("dup2 error!");
+                return 0;
+            }
+            execvp(args1[0], args1);
+        }
+
 
     } else { // handle basic command
         int pid = fork();
@@ -122,6 +153,7 @@ int process_arglist(int count, char **arglist) {
             execvp(arglist[0], arglist);
         } else { // parent code
             while ((waitpid(pid, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
+            return 1;
         }
     }
 
