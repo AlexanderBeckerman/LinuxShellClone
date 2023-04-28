@@ -25,6 +25,10 @@ void mySignalHandler(int signo) {
 
 }
 
+void child_handler(int signo){
+    if(curr_pid > 0)
+        while ( waitpid(-1, NULL, WNOHANG) > 0 );
+}
 
 int prepare(void) {
 
@@ -33,6 +37,14 @@ int prepare(void) {
             .sa_flags = SA_RESTART
     };
     if (sigaction(SIGINT, &newAction, NULL) == -1) {
+        perror("Signal handle registration failed");
+        exit(EXIT_FAILURE);
+    }
+    struct sigaction child = {
+            .sa_handler = child_handler,
+            .sa_flags = SA_RESTART
+    };
+    if(sigaction(SIGCHLD, &child, NULL)){
         perror("Signal handle registration failed");
         exit(EXIT_FAILURE);
     }
