@@ -12,13 +12,13 @@ int contains_pipe(char **, int);
 
 int contains_redirect(char **, int);
 
-static int curr_pid = 1; //static variable so we can tell what process is running or not. 1 for shell and background and 0 for child.
+static int curr_pid = 1; //static variable so we can tell what process is running or not. child pid for shell and background and 0 for child.
 
 void mySignalHandler(int signo) {
-    if (curr_pid == 1) {
+    if (curr_pid > 0) {
         //if we are the shell we dont want to terminate
         return;
-    } else { //else we are a child and we want to terminate
+    } else if(curr_pid == 0) { //else we are a child and we want to terminate
         exit(1);
     }
 
@@ -60,11 +60,13 @@ int process_arglist(int count, char **arglist) {
         }
         if (pid == 0) // child code
         {
+            curr_pid = 1;
             if(execvp(arglist[0], arglist) == -1){
                 perror("execvp failed!");
             }
             exit(1);
         } else { // parent code
+
             return 1;
         }
     }
@@ -89,6 +91,8 @@ int process_arglist(int count, char **arglist) {
             return 0;
         }
         if (pid1 > 0) { // parent code
+            curr_pid = pid1;
+
 
             pid2 = fork();
             if (pid2 == -1) {
@@ -96,7 +100,7 @@ int process_arglist(int count, char **arglist) {
                 return 0;
             }
             if (pid2 == 0) { // child2 code - reads from pipe
-                curr_pid = 0;
+                curr_pid = pid2;
                 close(pfds[1]);
                 int dup_exit = dup2(pfds[0], STDIN_FILENO);
                 close(pfds[0]);
@@ -110,13 +114,14 @@ int process_arglist(int count, char **arglist) {
                 };
             }
 
+            close(pfds[0]);
+            close(pfds[1]);
             while ((waitpid(pid1, &status, 0) == -1) &&
                    (errno == ECHILD || errno == EINTR)); // wait for child1 to write
             while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
-            close(pfds[0]);
-            close(pfds[1]);
+
         } else { // child1 code - writes to pipe
-            curr_pid = 0;
+            curr_pid = pid1;
             close(pfds[0]);
             int dup_exit = dup2(pfds[1], STDOUT_FILENO);
             close(pfds[1]);
@@ -156,6 +161,7 @@ int process_arglist(int count, char **arglist) {
             }
             return 1;
         } else {
+            curr_pid = pid;
             int dup_exit = dup2(fd, STDIN_FILENO);
             if (dup_exit == -1) {
                 perror("dup2 error!");
