@@ -12,18 +12,31 @@ int contains_pipe(char **, int);
 
 int contains_redirect(char **, int);
 
-void handler(int signo) {
-    return;
+static int curr_pid = 1; //static variable so we can tell what process is running or not. 1 for shell and background and 0 for child.
+
+void mySignalHandler(int signo) {
+    if (curr_pid == 1) {
+        //if we are the shell we dont want to terminate
+        return;
+    } else { //else we are a child and we want to terminate
+        exit(1);
+    }
+
+
 }
 
 
 int prepare(void) {
 
-    struct sigaction newAction = {.sa_handler = handler};
+    struct sigaction newAction = {
+            .sa_handler = mySignalHandler,
+            .sa_flags = SA_RESTART
+    };
     if (sigaction(SIGINT, &newAction, NULL) == -1) {
         perror("Signal handle registration failed");
         exit(EXIT_FAILURE);
     }
+
     return 0;
 }
 
@@ -33,7 +46,8 @@ int finalize(void) {
 
 int process_arglist(int count, char **arglist) {
 
-    int index;
+    int pipe_index = contains_pipe(arglist, count);
+    int redirect_index = contains_redirect(arglist, count);
     int status;
 
     if (strcmp(arglist[count - 1], "&") == 0) { // handle background
@@ -46,23 +60,24 @@ int process_arglist(int count, char **arglist) {
         }
         if (pid == 0) // child code
         {
-            execvp(arglist[0], arglist);
+            if(execvp(arglist[0], arglist) == -1){
+                perror("execvp failed!");
+            }
             exit(1);
         } else { // parent code
             return 1;
         }
     }
 
-    index = contains_pipe(arglist, count);
-    if (index != -1) { // handle pipe
+    else if (pipe_index != -1) { // handle pipe
 
         int pid1, pid2;
         int pfds[2];
         char **args1;
         char **args2;
         args1 = arglist; // get the args before the |
-        args1[index] = NULL;
-        args2 = arglist + (index + 1); // get the args after the |
+        args1[pipe_index] = NULL;
+        args2 = arglist + (pipe_index + 1); // get the args after the |
 
         if (pipe(pfds) == -1) {
             perror("Failed piping!");
@@ -74,14 +89,14 @@ int process_arglist(int count, char **arglist) {
             return 0;
         }
         if (pid1 > 0) { // parent code
-            while ((waitpid(pid1, &status, 0) == -1) &&
-                   (errno == ECHILD || errno == EINTR)); // wait for child1 to write
+
             pid2 = fork();
             if (pid2 == -1) {
                 perror("Failed forking!");
                 return 0;
             }
             if (pid2 == 0) { // child2 code - reads from pipe
+                curr_pid = 0;
                 close(pfds[1]);
                 int dup_exit = dup2(pfds[0], STDIN_FILENO);
                 close(pfds[0]);
@@ -89,12 +104,19 @@ int process_arglist(int count, char **arglist) {
                     perror("dup error");
                     exit(1);
                 }
-                execvp(args2[0], args2);
+                if(execvp(args2[0], args2) == -1){
+                    perror("execvp failed!");
+                    exit(1);
+                };
             }
+
+            while ((waitpid(pid1, &status, 0) == -1) &&
+                   (errno == ECHILD || errno == EINTR)); // wait for child1 to write
+            while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
             close(pfds[0]);
             close(pfds[1]);
-            while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
         } else { // child1 code - writes to pipe
+            curr_pid = 0;
             close(pfds[0]);
             int dup_exit = dup2(pfds[1], STDOUT_FILENO);
             close(pfds[1]);
@@ -102,17 +124,19 @@ int process_arglist(int count, char **arglist) {
                 perror("dup2 error!");
                 exit(1);
             }
-            execvp(args1[0], args1);
+            if(execvp(args1[0], args1) == -1){
+                perror("execvp failed!");
+                exit(1);
+            }
         }
 
         return 1;
     }
-    index = contains_redirect(arglist, count);
-    if (index != -1) { // handle redirect
 
+    else if (redirect_index != -1) { // handle redirect
         char **args1 = arglist;
-        char *filename = arglist[index + 1];
-        arglist[index] = NULL;
+        char *filename = arglist[redirect_index + 1];
+        arglist[redirect_index] = NULL;
         int fd = open(filename, O_RDONLY);
         if (fd == -1) {
             perror("failed opening file!");
@@ -137,11 +161,13 @@ int process_arglist(int count, char **arglist) {
                 perror("dup2 error!");
                 return 0;
             }
-            execvp(args1[0], args1);
+            if(execvp(args1[0], args1) == -1){
+                perror("execvp failed!");
+                exit(1);
+            }
         }
-
-
-    } else { // handle basic command
+    }
+    else{ // handle basic command
         int pid = fork();
 
         if (pid == -1) {
@@ -150,10 +176,13 @@ int process_arglist(int count, char **arglist) {
         }
         if (pid == 0) // child code
         {
-            execvp(arglist[0], arglist);
+            curr_pid = 0;
+            if(execvp(arglist[0], arglist) == -1){
+                perror("execvp failed!");
+                exit(1);
+            }
         } else { // parent code
             while ((waitpid(pid, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
-            return 1;
         }
     }
 
