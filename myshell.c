@@ -25,7 +25,7 @@ void mySignalHandler(int signo) {
 
 }
 
-void child_handler(int signo){
+void child_handler(int signo){ //wait for background processes with handler so we dont block code
     if(curr_pid > 0)
         while ( waitpid(-1, NULL, WNOHANG) > 0 );
 }
@@ -72,7 +72,7 @@ int process_arglist(int count, char **arglist) {
         }
         if (pid == 0) // child code
         {
-            curr_pid = 1;
+            curr_pid = 1; // we dont want to terminate background on sigint
             if(execvp(arglist[0], arglist) == -1){
                 perror("execvp failed!");
             }
@@ -130,7 +130,8 @@ int process_arglist(int count, char **arglist) {
             close(pfds[1]);
             while ((waitpid(pid1, &status, 0) == -1) &&
                    (errno == ECHILD || errno == EINTR)); // wait for child1 to write
-            while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
+//            while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
+            return 1;
 
         } else { // child1 code - writes to pipe
             curr_pid = pid1;
