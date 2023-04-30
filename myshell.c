@@ -28,10 +28,10 @@ void mySignalHandler(int signo) {
 
 }
 
-void child_handler(int signo){ //wait for background processes with handler so we dont block code
-    if(curr_pid > 0){
+void child_handler(int signo){ //wait for background processes with handler for sigchld signal so we dont block code
+    if(curr_pid > 0){ //if we are the shell we want to wait for the child that sent the sigchld
         is_background = 0;
-        waitpid(-1, NULL, WNOHANG); //
+        waitpid(-1, NULL, WNOHANG);
     }
 }
 
