@@ -8,61 +8,18 @@
 #include <signal.h>
 #include <fcntl.h>
 
-int contains_pipe(char **, int);
+int contains_pipe(char **, int); //returns index of pipe symbol if it exists, -1 otherwise.
 
-int contains_redirect(char **, int);
+int contains_redirect(char **, int);//returns index of redirect symbol if it exists, -1 otherwise.
 
 static int curr_pid = 1; //static variable so we can tell what process is running or not. child pid for shell and background and 0 for child.
-static int is_background = 0;
+static int is_background = 0;//flag that tells us if we are a background process or not
 
-typedef struct Node {
-    int data;
-    struct Node* next;
-}Node;
 
-//static Node *  head = NULL;
-
-void add_background(struct Node** head_ref, int pid) //from geeksforgeeks.org
-{
-    struct Node* new_node
-            = (struct Node*)malloc(sizeof(struct Node));
-    new_node->data = pid;
-    new_node->next = (*head_ref);
-    (*head_ref) = new_node;
-}
-
-void delete_background(struct Node** head_ref, int pid) //from geeksforgeeks.org
-{
-    // Store head node
-    struct Node *temp = *head_ref, *prev;
-
-    // If head node itself holds the key to be deleted
-    if (temp != NULL && temp->data == pid) {
-        *head_ref = temp->next; // Changed head
-        free(temp); // free old head
-        return;
-    }
-
-    // Search for the key to be deleted, keep track of the
-    // previous node as we need to change 'prev->next'
-    while (temp != NULL && temp->data != pid) {
-        prev = temp;
-        temp = temp->next;
-    }
-
-    // If key was not present in linked list
-    if (temp == NULL)
-        return;
-
-    // Unlink the node from linked list
-    prev->next = temp->next;
-
-    free(temp); // Free memory
-}
 void mySignalHandler(int signo) {
     if (curr_pid > 0 || is_background == 1) {
 
-        //if we are the shell we dont want to terminate
+        //if we are the shell we dont want to terminate on sigint
         return;
     } else if(curr_pid == 0) { //else we are a child and we want to terminate
         exit(1);
@@ -74,7 +31,7 @@ void mySignalHandler(int signo) {
 void child_handler(int signo){ //wait for background processes with handler so we dont block code
     if(curr_pid > 0){
         is_background = 0;
-        waitpid(-1, NULL, WNOHANG);
+        while(waitpid(-1, NULL, WNOHANG) > 0); //
     }
 }
 
@@ -83,7 +40,7 @@ int prepare(void) {
     struct sigaction newAction = {
             .sa_handler = mySignalHandler,
             .sa_flags = SA_RESTART
-    };
+    };//struct for sigint handle
     if (sigaction(SIGINT, &newAction, NULL) == -1) {
         perror("Signal handle registration failed");
         exit(EXIT_FAILURE);
@@ -91,7 +48,7 @@ int prepare(void) {
     struct sigaction child = {
             .sa_handler = child_handler,
             .sa_flags = SA_RESTART
-    };
+    };//struct for sigchld handle for when background processes exit
     if(sigaction(SIGCHLD, &child, NULL)){
         perror("Signal handle registration failed");
         exit(EXIT_FAILURE);
@@ -101,7 +58,6 @@ int prepare(void) {
 }
 
 int finalize(void) {
-    //free_list(head);
     return 0;
 }
 
@@ -122,7 +78,7 @@ int process_arglist(int count, char **arglist) {
         if (pid == 0) // child code
         {
             curr_pid = getpid(); // we dont want to terminate background on sigint
-            is_background = 1;
+            is_background = 1; //we are a background process so we turn on the flag
             if(signal(SIGINT, SIG_IGN) == SIG_ERR){ //added this because background processes wouldn't use my handler for some reason but this seemed to fix it...
                 perror("signal failed!");
                 exit(1);
@@ -144,14 +100,14 @@ int process_arglist(int count, char **arglist) {
         char **args1;
         char **args2;
         args1 = arglist; // get the args before the |
-        args1[pipe_index] = NULL;
+        args1[pipe_index] = NULL;//get rid of pipe symbol
         args2 = arglist + (pipe_index + 1); // get the args after the |
 
         if (pipe(pfds) == -1) {
             perror("Failed piping!");
             return 0;
         }
-        pid1 = fork();
+        pid1 = fork(); //fork for the command before the |
         if (pid1 == -1) {
             perror("Failed forking!");
             return 0;
@@ -160,7 +116,7 @@ int process_arglist(int count, char **arglist) {
             curr_pid = pid1;
 
 
-            pid2 = fork();
+            pid2 = fork(); //fork for the command after the |
             if (pid2 == -1) {
                 perror("Failed forking!");
                 return 0;
@@ -168,7 +124,7 @@ int process_arglist(int count, char **arglist) {
             if (pid2 == 0) { // child2 code - reads from pipe
                 curr_pid = pid2;
                 close(pfds[1]);
-                int dup_exit = dup2(pfds[0], STDIN_FILENO);
+                int dup_exit = dup2(pfds[0], STDIN_FILENO); //copy read end of the pipe to the process stdin
                 close(pfds[0]);
                 if (dup_exit == -1) {
                     perror("dup error");
@@ -183,14 +139,14 @@ int process_arglist(int count, char **arglist) {
             close(pfds[0]);
             close(pfds[1]);
             while ((waitpid(pid1, &status, 0) == -1) &&
-                   (errno == ECHILD || errno == EINTR)); // wait for child1 to write
-//            while ((waitpid(pid2, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
+                   (errno == ECHILD || errno == EINTR)); //wait for child1 to finish.
+                   //i didn't wait for child 2 because it caused bugs (in case of sleep cmd) so i wait for it in the sigchld handler
             return 1;
 
         } else { // child1 code - writes to pipe
             curr_pid = pid1;
             close(pfds[0]);
-            int dup_exit = dup2(pfds[1], STDOUT_FILENO);
+            int dup_exit = dup2(pfds[1], STDOUT_FILENO); //copy write end of pipe to the process stdout
             close(pfds[1]);
             if (dup_exit == -1) {
                 perror("dup2 error!");
@@ -208,7 +164,7 @@ int process_arglist(int count, char **arglist) {
     else if (redirect_index != -1) { // handle redirect
         char **args1 = arglist;
         char *filename = arglist[redirect_index + 1];
-        arglist[redirect_index] = NULL;
+        arglist[redirect_index] = NULL; //get rid of redirect symbol
         int fd = open(filename, O_RDONLY);
         if (fd == -1) {
             perror("failed opening file!");
@@ -219,17 +175,17 @@ int process_arglist(int count, char **arglist) {
             perror("Failed forking!");
             return 0;
         }
-        if (pid > 0) {
+        if (pid > 0) { //parent code
             while ((waitpid(pid, &status, 0) == -1) &&
                    (errno == ECHILD || errno == EINTR)); //wait for the child to finish
-            if (close(fd) == -1) {
+            if (close(fd) == -1) { //close the file
                 perror("error closing file");
                 return 0;
             }
             return 1;
-        } else {
+        } else { //child code
             curr_pid = pid;
-            int dup_exit = dup2(fd, STDIN_FILENO);
+            int dup_exit = dup2(fd, STDIN_FILENO); //pass the redirect input to the stdin of the process
             if (dup_exit == -1) {
                 perror("dup2 error!");
                 return 0;
@@ -255,7 +211,7 @@ int process_arglist(int count, char **arglist) {
                 exit(1);
             }
         } else { // parent code
-            while ((waitpid(pid, &status, 0) == -1) && (errno == ECHILD || errno == EINTR));
+            while ((waitpid(pid, &status, 0) == -1) && (errno == ECHILD || errno == EINTR)); //wait for the child process to exit
         }
     }
 
