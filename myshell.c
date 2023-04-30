@@ -31,7 +31,7 @@ void mySignalHandler(int signo) {
 void child_handler(int signo){ //wait for background processes with handler so we dont block code
     if(curr_pid > 0){
         is_background = 0;
-        while(waitpid(-1, NULL, WNOHANG) > 0); //
+        waitpid(-1, NULL, WNOHANG); //
     }
 }
 
