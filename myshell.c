@@ -13,9 +13,55 @@ int contains_pipe(char **, int);
 int contains_redirect(char **, int);
 
 static int curr_pid = 1; //static variable so we can tell what process is running or not. child pid for shell and background and 0 for child.
+static int is_background = 0;
 
+typedef struct Node {
+    int data;
+    struct Node* next;
+}Node;
+
+//static Node *  head = NULL;
+
+void add_background(struct Node** head_ref, int pid) //from geeksforgeeks.org
+{
+    struct Node* new_node
+            = (struct Node*)malloc(sizeof(struct Node));
+    new_node->data = pid;
+    new_node->next = (*head_ref);
+    (*head_ref) = new_node;
+}
+
+void delete_background(struct Node** head_ref, int pid) //from geeksforgeeks.org
+{
+    // Store head node
+    struct Node *temp = *head_ref, *prev;
+
+    // If head node itself holds the key to be deleted
+    if (temp != NULL && temp->data == pid) {
+        *head_ref = temp->next; // Changed head
+        free(temp); // free old head
+        return;
+    }
+
+    // Search for the key to be deleted, keep track of the
+    // previous node as we need to change 'prev->next'
+    while (temp != NULL && temp->data != pid) {
+        prev = temp;
+        temp = temp->next;
+    }
+
+    // If key was not present in linked list
+    if (temp == NULL)
+        return;
+
+    // Unlink the node from linked list
+    prev->next = temp->next;
+
+    free(temp); // Free memory
+}
 void mySignalHandler(int signo) {
-    if (curr_pid > 0) {
+    if (curr_pid > 0 || is_background == 1) {
+
         //if we are the shell we dont want to terminate
         return;
     } else if(curr_pid == 0) { //else we are a child and we want to terminate
@@ -26,8 +72,10 @@ void mySignalHandler(int signo) {
 }
 
 void child_handler(int signo){ //wait for background processes with handler so we dont block code
-    if(curr_pid > 0)
-        while ( waitpid(-1, NULL, WNOHANG) > 0 );
+    if(curr_pid > 0){
+        is_background = 0;
+        waitpid(-1, NULL, WNOHANG);
+    }
 }
 
 int prepare(void) {
@@ -53,6 +101,7 @@ int prepare(void) {
 }
 
 int finalize(void) {
+    //free_list(head);
     return 0;
 }
 
@@ -72,7 +121,12 @@ int process_arglist(int count, char **arglist) {
         }
         if (pid == 0) // child code
         {
-            curr_pid = 1; // we dont want to terminate background on sigint
+            curr_pid = getpid(); // we dont want to terminate background on sigint
+            is_background = 1;
+            if(signal(SIGINT, SIG_IGN) == SIG_ERR){ //added this because background processes wouldn't use my handler for some reason but this seemed to fix it...
+                perror("signal failed!");
+                exit(1);
+            }
             if(execvp(arglist[0], arglist) == -1){
                 perror("execvp failed!");
             }
